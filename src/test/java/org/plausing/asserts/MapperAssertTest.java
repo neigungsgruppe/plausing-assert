@@ -14,7 +14,6 @@ import static org.plausing.asserts.PlausingAssertions.assertThat;
  * Tests for {@link MapperAssert}.
  *
  * @author Florian Rodler
- * @copyright Florian Rodler, 2015
  */
 public class MapperAssertTest {
 
@@ -36,10 +35,7 @@ public class MapperAssertTest {
     @Test
     public void should_fail_if_unmapped_fields_exist() {
         // given a mapper that doesn't map any field
-        Function<A, B> mapper = (A a) -> {
-            B b = new B();
-            return b;
-        };
+        Function<A, B> mapper = a -> new B();
 
         try {
             // when testing the mapper
@@ -222,12 +218,7 @@ public class MapperAssertTest {
         public String att1;
     }
 
-    public static class TMapper {
-        public String map(Integer v) {
-            return String.valueOf(v);
-        }
-    }
-
+    @SuppressWarnings("unused")
     public static class SE {
         private String stringValue;
     }
@@ -236,16 +227,19 @@ public class MapperAssertTest {
         private E enumValue;
     }
 
+    @SuppressWarnings("unused")
     public static class TE2 {
         private E2 enumValue;
     }
 
+    @SuppressWarnings("unused")
     public static enum E {
-        ec1, ec2;
+        ec1, ec2
     }
 
+    @SuppressWarnings("unused")
     public static enum E2 {
-        ec1, ec2;
+        ec1, ec2
     }
 
     public static class CInteger {
