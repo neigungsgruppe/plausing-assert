@@ -1,1 +1,3 @@
-# plausing-assert 
+Plausibility testing based on AssertJ.
+
+
