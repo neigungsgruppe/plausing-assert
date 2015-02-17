@@ -22,18 +22,18 @@ import static org.plausing.asserts.ReflectionUtil.getFields;
 
 /**
  * Asserts that a function that maps an object of type SOURCE to an object of type TARGET has a plausible mapping logic.
- *
- * <p/>
+ * <p>
+ * <p>
  * MapperAssert asserts that the following assumptions are valid:
  * - Every field of the TARGET object will be set by the mapper.
  * - Every field of the SOURCE object will be be mapped to (at most) one field of the TARGET object.
  * - The whole range of every field of the SOURCE object can be processed by the mapper.
- *   This includes null values for types with boxing / unboxing.
+ * This includes null values for types with boxing / unboxing.
  * - If a field of the SOURCE object is set to value x, the corresponding TARGET field is set to exactly this value x.
- * <p/>
+ * <p>
  * MapperAssert relies on the following assumptions, but doesn't test them:
  * - Fields are independent of each other. Every field is tested in isolation, so the test will finish in O(n) time
- *   with n = number of fields.
+ * with n = number of fields.
  */
 public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SOURCE, TARGET>, Function> {
 
@@ -336,13 +336,13 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
 
         if (override.isPresent()) {
             Assertions.assertThat(actual)
-                    .as(String.format("Error in mapping (with override) %s --> %s: ", sourceField.getName(), targetField.getName()))
+                    .as(String.format("Error in mapping (with override) %s --> %s", sourceField.getName(), targetField.getName()))
                     .isEqualTo(override.get());
             return myself;
         }
 
         Assertions.assertThat(actual)
-                .as(String.format("Error in mapping %s --> %s: ", sourceField.getName(), targetField.getName()))
+                .as(String.format("Error in mapping %s --> %s", sourceField.getName(), targetField.getName()))
                 .isEqualTo(expected);
 
         return myself;
@@ -378,7 +378,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
 
     /**
      * Bildet ein einen Wert sourceValue, der in sourceField steht, auf einen Wert in targetField ab.
-     * <p/>
+     * <p>
      * Strategie:
      * (a) Einfaches Mapping bei identischen Datentypen
      * (b) Enum zu Enum-Mapping ueber den Name
@@ -409,10 +409,27 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
             try {
                 expected = guessConstructorMapping(sourceValue, sourceType, targetType);
             } catch (Exception e) {
-                expected = guessGetterMapping(sourceValue, sourceType, targetType);
+                try {
+                    expected = guessGetterMapping(sourceValue, sourceType, targetType);
+                } catch (Exception e2) {
+                    expected = guessUnboxingMapping(sourceValue, sourceType, targetType);
+                }
             }
         }
         return expected;
+    }
+
+    private Object guessUnboxingMapping(Object sourceValue, Class sourceType, Class targetType) {
+        if (sourceType.equals(Integer.class) && targetType.equals(int.class)) {
+            return sourceValue;
+        }
+        if (sourceType.equals(Long.class) && targetType.equals(long.class)) {
+            return sourceValue;
+        }
+        if (sourceType.equals(Double.class) && targetType.equals(double.class)) {
+            return sourceValue;
+        }
+        throw new IllegalArgumentException();
     }
 
     private <SOURCE, TARGET> TARGET guessConstructorMapping(SOURCE sourceValue, Class<SOURCE> sourceType, Class<TARGET> targetType) {
@@ -648,7 +665,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
 
     /**
      * Generates test values from a generating type.
-     * <p/>
+     * <p>
      * Example:
      * Let generatingType be int. Then the test values are Integer.MIN_VALUE, Integer.MAX_VALUE, 1, -1, 0
      * This method will take every test value and create a new instance of Class<TARGET> by calling
