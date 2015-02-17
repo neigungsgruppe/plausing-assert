@@ -11,7 +11,7 @@ import static org.assertj.core.api.Fail.fail;
 import static org.plausing.asserts.PlausingAssertions.assertThat;
 
 /**
- * Tests for MapperAssert.
+ * Tests for {@link MapperAssert}.
  *
  * @author Florian Rodler
  * @copyright Florian Rodler, 2015
