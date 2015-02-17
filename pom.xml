@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>org.plausing</groupId>
-    <artifactId>plausing-asserts</artifactId>
+    <artifactId>plausing-assert</artifactId>
     <version>0.1-SNAPSHOT</version>
 
     <dependencies>
