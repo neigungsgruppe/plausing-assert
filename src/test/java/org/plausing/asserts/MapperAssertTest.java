@@ -17,7 +17,6 @@ import static org.plausing.asserts.PlausingAssertions.assertThat;
  */
 public class MapperAssertTest {
 
-
     @Test
     public void should_pass_if_string_field_is_mapped_to_string_field() {
         // given a mapper that maps from String to String
