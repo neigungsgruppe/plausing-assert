@@ -44,7 +44,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
     /* Test data. */
     private static final String A_TEST_STRING = "A test string.";
     /* Logger. */
-    private static Logger LOG = Logger.getLogger(MapperAssert.class);
+    private Logger LOG = Logger.getLogger(MapperAssert.class);
     /* The mapperUnderTest function under Test */
     private final Function<SOURCE, TARGET> mapperUnderTest;
     /* Test data container */
@@ -158,8 +158,8 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
     /**
      * Excludes fields in the target object from being tested.
      *
-     * @param excludedTargetFields
-     * @return
+     * @param excludedTargetFields fields in the target class that should not tested.
+     * @return reference to the MapperAssert.
      */
     public MapperAssert<SOURCE, TARGET> withExcludedTargetFields(Set<String> excludedTargetFields) {
         this.excludedTargetFields = excludedTargetFields;
@@ -169,7 +169,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
     /**
      * Excludes fields in the target object from being tested.
      *
-     * @param excludedTargetFields
+     * @param excludedTargetFields fields in the target class that should not tested.
      * @return
      */
     public MapperAssert<SOURCE, TARGET> withExcludedTargetFields(String... excludedTargetFields) {
@@ -182,12 +182,12 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
      * Sets the list of Enum.name() as test values for the field with name fieldName.
      *
      * @param fieldName name of the field
-     * @param enumClass class of the enum to be used.
+     * @param enumType class of the enum to be used.
      * @param <E>       enum type
      * @return this.
      */
-    public <E extends Enum> MapperAssert<SOURCE, TARGET> withEnumNamesAsTestValuesForField(String fieldName, Class<E> enumClass) {
-        List<String> testValues = toStringValuesList(enumClass);
+    public <E extends Enum> MapperAssert<SOURCE, TARGET> withEnumNamesAsTestValuesForField(String fieldName, Class<E> enumType) {
+        List<String> testValues = toStringValuesList(enumType);
         return this.withTestAndLearningValuesForField(fieldName, testValues, testValues.get(0));
     }
 
@@ -282,7 +282,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
                 targetFields.stream()
                         .filter(targetField -> !changedTargetFields.contains(targetField)
                                 && !excludedTargetFields.contains(targetField.getName()))
-                        .map(f -> f.getName())
+                        .map(Field::getName)
                         .collect(joining(", "));
 
         if (!"".equals(unchangedTargetFieldNames)) {
@@ -294,21 +294,26 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
     /**
      * Asserts that all fields map to corresponding fields in the target class with the expected values.
      *
-     * @param sourceFields
-     * @param sourceToTargetFields
+     * @param sourceFields list of all fields of the source class
+     * @param sourceToTargetFields map
      * @throws IllegalAccessException
      * @throws InstantiationException
      * @throws NoSuchFieldException
      * @throws java.sql.SQLException
      */
-    private MapperAssert<SOURCE, TARGET> assertThatAllTestValuesAreMappedToTheirExpectedValues(ArrayList<Field> sourceFields, Map<Field, Field> sourceToTargetFields) throws IllegalAccessException, InstantiationException, NoSuchFieldException, SQLException {
+    private MapperAssert<SOURCE, TARGET> assertThatAllTestValuesAreMappedToTheirExpectedValues(
+            List<Field> sourceFields, Map<Field, Field> sourceToTargetFields)
+            throws IllegalAccessException, InstantiationException, NoSuchFieldException, SQLException {
+
         for (Field sourceField : sourceFields) {
+
             Field targetField = sourceToTargetFields.get(sourceField);
             if (targetField == null) continue;
 
             LOG.info(String.format("Testing field mapping: %s --> %s ... ", sourceField, targetField));
 
             for (Object v : getTestValuesForField(sourceField)) {
+                LOG.info(String.format("Testing value: %s ... ", v));
                 assertThatFieldIsMappedToExpectedValue(sourceField, targetField, v);
             }
         }
@@ -316,35 +321,44 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         return myself;
     }
 
-    private void setFieldValue(SOURCE source, Field sourceField, Object v) throws IllegalAccessException {
-        sourceField.setAccessible(true);
-        sourceField.set(source, v);
-    }
+    /**
+     * Asserts that the tested value of the source field is  mapped to the target field correctly.
+     *
+     * @param sourceField the source field
+     * @param targetField the target field
+     * @param testedValue source value being tested
+     * @return the MapperAssert
+     * @throws SQLException
+     * @throws IllegalAccessException
+     * @throws NoSuchFieldException
+     */
+    private MapperAssert<SOURCE, TARGET> assertThatFieldIsMappedToExpectedValue(Field sourceField, Field targetField, Object testedValue) throws SQLException, IllegalAccessException, NoSuchFieldException {
 
-
-    private MapperAssert<SOURCE, TARGET> assertThatFieldIsMappedToExpectedValue(Field sourceField, Field targetField, Object v) throws SQLException, IllegalAccessException, NoSuchFieldException {
-
+        // get a new source reference and change the tested field's value
         SOURCE source = sourceSupplier.get();
-        setFieldValue(source, sourceField, v);
+        ReflectionUtil.setFieldValue(source, sourceField, testedValue);
 
+        // apply the mapper to the source field and get the actualMappedValue value
         TARGET target = mapperUnderTest.apply(source);
-        Object actual = getFieldValue(targetField, target);
+        Object actualMappedValue = getFieldValue(targetField, target);
 
-        Object sourceValue = getFieldValue(sourceField, source);
-        Object expected = getExpectedFieldValue(sourceField, targetField, sourceValue);
-        Optional<Object> override = getOverrideForExpectedFieldValue(sourceField.getName(), targetField.getName(), sourceValue);
+        // guess correct mapping
+        Object expectedMappedValue = getExpectedFieldValue(testedValue, sourceField.getType(), targetField.getType());
+        // look for declared override for the mapping
+        Optional<Object> override = getOverrideForExpectedFieldValue(sourceField.getName(), targetField.getName(), testedValue);
 
+        // if there is an override, test with the override
         if (override.isPresent()) {
-            Assertions.assertThat(actual)
+            Assertions.assertThat(actualMappedValue)
                     .as(String.format("Error in mapping (with override) %s --> %s", sourceField.getName(), targetField.getName()))
                     .isEqualTo(override.get());
             return myself;
         }
 
-        Assertions.assertThat(actual)
+        // else, test with the guessed value
+        Assertions.assertThat(actualMappedValue)
                 .as(String.format("Error in mapping %s --> %s", sourceField.getName(), targetField.getName()))
-                .isEqualTo(expected);
-
+                .isEqualTo(expectedMappedValue);
         return myself;
     }
 
@@ -383,18 +397,17 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
      * (a) Einfaches Mapping bei identischen Datentypen
      * (b) Enum zu Enum-Mapping ueber den Name
      * (c) String zu Enum-Mapping ueber den Name
+     * (d) Collections mappen jedes Element ueber eine Strategie (a-d)
      *
-     * @param sourceField
-     * @param targetField
      * @param sourceValue
+     * @param sourceType
+     * @param targetType
      * @return
      */
-    private Object getExpectedFieldValue(Field sourceField, Field targetField, Object sourceValue) {
-        Class sourceType = sourceField.getType();
-        Class targetType = targetField.getType();
+    private Object getExpectedFieldValue(Object sourceValue, Class sourceType, Class targetType) {
 
         Function valueMapper = testData.mappers.get(new TypePair(sourceType.getCanonicalName(), targetType.getCanonicalName()));
-        Object expected = null;
+        Object expected;
         if (valueMapper != null) {
             expected = valueMapper.apply(sourceValue);
         } else if (valueMapper == null && Enum.class.isAssignableFrom(sourceType) && Enum.class.isAssignableFrom(targetType)) {
@@ -403,6 +416,8 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
             expected = guessStringToEnumMapping((String) sourceValue, (Class<Enum>) targetType);
         } else if (valueMapper == null && Enum.class.isAssignableFrom(sourceType) && String.class.isAssignableFrom(targetType)) {
             expected = guessEnumToStringMapping((Enum) sourceValue);
+        } else if (Collection.class.isAssignableFrom(sourceType) && Collection.class.isAssignableFrom(targetType)) {
+            expected = guessCollectionMapping((Collection) sourceValue, sourceType, targetType);
         } else if (targetType.isAssignableFrom(sourceType)) {
             expected = sourceValue;
         } else {
@@ -419,7 +434,21 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         return expected;
     }
 
-    private Object guessUnboxingMapping(Object sourceValue, Class sourceType, Class targetType) {
+    <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> Collection guessCollectionMapping(Collection sourceValue, Class<SOURCE_FIELD_TYPE> sourceType, Class<TARGET_FIELD_TYPE> targetType) {
+        // pruefen, ob es bereits eine Collection gibt, dann diese verwenden.
+        //Collection targetInstance = (Collection)targetType.newInstance();
+        // Falls nicht, instantiieren wir auf Verdacht eine Implementierung
+        Collection targetInstance = new ArrayList<>();
+
+        for (Object o : sourceValue) {
+            Object expectedElementValue = getExpectedFieldValue(o, Integer.class, Long.class);
+            targetInstance.add(expectedElementValue);
+        }
+        return targetInstance;
+
+    }
+
+    <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> SOURCE_FIELD_TYPE guessUnboxingMapping(SOURCE_FIELD_TYPE sourceValue, Class<SOURCE_FIELD_TYPE> sourceType, Class targetType) {
         if (sourceType.equals(Integer.class) && targetType.equals(int.class)) {
             return sourceValue;
         }
@@ -432,14 +461,14 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         throw new IllegalArgumentException();
     }
 
-    private <SOURCE, TARGET> TARGET guessConstructorMapping(SOURCE sourceValue, Class<SOURCE> sourceType, Class<TARGET> targetType) {
+    <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> TARGET_FIELD_TYPE guessConstructorMapping(SOURCE_FIELD_TYPE sourceValue, Class<SOURCE_FIELD_TYPE> sourceType, Class<TARGET_FIELD_TYPE> targetType) {
 
         if (sourceValue == null) return null;
         return ReflectionUtil.instantiateType(targetType, sourceType, sourceValue);
 
     }
 
-    private <SOURCE, TARGET> TARGET guessGetterMapping(SOURCE sourceValue, Class<SOURCE> sourceType, Class<TARGET> targetType) {
+     <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> TARGET_FIELD_TYPE guessGetterMapping(SOURCE_FIELD_TYPE sourceValue, Class<SOURCE_FIELD_TYPE> sourceType, Class<TARGET_FIELD_TYPE> targetType) {
         if (sourceValue == null) return null;
         Method[] methods = sourceType.getMethods();
         for (Method method : methods) {
@@ -447,7 +476,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
                     && !ReflectionUtil.isStatic(method)
                     && method.getName().startsWith("get")) {
                 try {
-                    return (TARGET) method.invoke(sourceValue);
+                    return (TARGET_FIELD_TYPE) method.invoke(sourceValue);
                 } catch (IllegalAccessException e) {
                     throw new IllegalArgumentException();
                 } catch (InvocationTargetException e) {
@@ -457,15 +486,15 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         }
 
         if (Long.class.equals(targetType)) {
-            return (TARGET) guessGetterMapping(sourceValue, sourceType, long.class);
+            return (TARGET_FIELD_TYPE) guessGetterMapping(sourceValue, sourceType, long.class);
         }
 
         if (Integer.class.equals(targetType)) {
-            return (TARGET) guessGetterMapping(sourceValue, sourceType, int.class);
+            return (TARGET_FIELD_TYPE) guessGetterMapping(sourceValue, sourceType, int.class);
         }
 
         if (Double.class.equals(targetType)) {
-            return (TARGET) guessGetterMapping(sourceValue, sourceType, double.class);
+            return (TARGET_FIELD_TYPE) guessGetterMapping(sourceValue, sourceType, double.class);
         }
 
         throw new IllegalArgumentException();
@@ -476,12 +505,12 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         return sourceValue.name();
     }
 
-    private <TARGET extends Enum> Object guessStringToEnumMapping(String sourceValue, Class<TARGET> targetType) {
+    private <TARGET_FIELD_TYPE extends Enum> Object guessStringToEnumMapping(String sourceValue, Class<TARGET_FIELD_TYPE> targetType) {
         if (sourceValue == null) return null;
         return Enum.valueOf(targetType, sourceValue);
     }
 
-    private <SOURCE extends Enum, TARGET extends Enum> Object guessEnumToEnumMapping(SOURCE sourceValue, Class<TARGET> targetType) {
+    private <SOURCE_FIELD_TYPE extends Enum, TARGET_FIELD_TYPE extends Enum> Object guessEnumToEnumMapping(SOURCE_FIELD_TYPE sourceValue, Class<TARGET_FIELD_TYPE> targetType) {
         if (sourceValue == null) return null;
         String sourceString = sourceValue.name();
         return Enum.valueOf(targetType, sourceString);
@@ -525,7 +554,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
      * @param targetValues
      * @return
      */
-    public MapperAssert<SOURCE, TARGET> withValueListMapper(final Class<SOURCE> sourceClass, final Class<TARGET> targetClass, final List<SOURCE> sourceValues, final List<TARGET> targetValues) {
+    public <SOURCE_TYPE, TARGET_TYPE> MapperAssert<SOURCE, TARGET> withValueListMapper(final Class<SOURCE_TYPE> sourceClass, final Class<TARGET_TYPE> targetClass, final List<SOURCE_TYPE> sourceValues, final List<TARGET_TYPE> targetValues) {
         testData.mappers.put(new TypePair(sourceClass.getCanonicalName(), targetClass.getCanonicalName()),
                 sourceValue -> {
                     // Test the list for matches
@@ -544,18 +573,39 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         return myself;
     }
 
+    /**
+     * Adds a mapper to the MapperAssert.
+     *
+     * @param mapper
+     * @return
+     */
+    public <SOURCE_TYPE, TARGET_TYPE> MapperAssert<SOURCE, TARGET> withMapper(Mappers.Mapper mapper) {
+        testData.mappers.put(mapper.typePair, mapper.mappingFunction);
+        return myself;
+    }
+
+    /**
+     * Learns the mapping by setting source field values and examining the target object for changed fields.
+     *
+     * @param sourceReference
+     * @param targetReference
+     * @param sourceFields
+     * @param changedTargetFields
+     * @param mapping
+     * @param <SOURCE>
+     * @param <TARGET>
+     */
     private <SOURCE, TARGET> void learnMapping(SOURCE sourceReference, TARGET targetReference, ArrayList<Field> sourceFields, Set<Field> changedTargetFields, Map<Field, Field> mapping) {
         for (Field sourceField : sourceFields) {
 
-            Set<Field> changedTargetFieldsByField = shake(sourceReference, targetReference, sourceField, getTestValuesForField(sourceField));
+            Set<Field> changedTargetFieldsByField = applyMapperToTestValues(sourceField, getTestValuesForField(sourceField));
 
             if (changedTargetFieldsByField.size() > 1) {
                 String changedFieldsList = changedTargetFieldsByField.stream()
                         .map(f -> f.getName())
                         .collect(joining(", "));
-                String message = String.format("Mapping error: %s --> [%s]", sourceField.getName(), changedFieldsList);
-                LOG.info(message);
-                fail("Source field maps to more than one target fields. " + message);
+                LOG.info(String.format("Mapping error: %s --> [%s]", sourceField.getName(), changedFieldsList));
+                fail("Source field maps to more than one target fields. " + String.format("Mapping error: %s --> [%s]", sourceField.getName(), changedFieldsList));
             }
             if (changedTargetFieldsByField.size() > 0) {
                 Field changedTargetField = changedTargetFieldsByField.stream().findAny().get();
@@ -569,17 +619,15 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         }
     }
 
-    private <A, B> Set<Field> shake(Object sourceReference, Object targetReference, Field field, List<?> testValues) {
-        Set<Field> changed = new HashSet<Field>();
-        for (Object testValue : testValues) {
-            changed.addAll(setSourceFieldAndApplyMapper(field, testValue));
-        }
-        return changed;
+    private <A, B> Set<Field> applyMapperToTestValues(Field field, List<?> testValues) {
+        return testValues.stream()
+                .flatMap(testValue -> setSourceFieldAndApplyMapper(field, testValue).stream())
+                .collect(Collectors.toSet());
     }
 
 
     /**
-     * Sets the source Field
+     * Sets a source field to the testValue and applies the mapper.
      *
      * @param field
      * @param testValue
@@ -590,7 +638,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         TARGET target;
 
         try {
-            setFieldValue(source, field, testValue);
+            ReflectionUtil.setFieldValue(source, field, testValue);
             target = mapperUnderTest.apply(source);
         } catch (Throwable e) {
             AssertionFailedError assertionFailedError = new AssertionFailedError("Exception while learning the mapping using field " + field.getName() + " with value " + testValue);
@@ -602,6 +650,14 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         return changed;
     }
 
+
+    /**
+     * Examines the target and collects all the fields that have changed.
+     *
+     * @param target
+     * @param <TARGET>
+     * @return
+     */
     private <TARGET> Set<Field> getChangedFields(TARGET target) {
         Set<Field> result = new HashSet<Field>();
         ArrayList<Field> fields = getFields(targetReference);
@@ -630,6 +686,15 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         return result;
     }
 
+    /**
+     * Gets the list of test values for a field using the following strategies:
+     * 1. Try to get test values by field name
+     * 2. Try to get test values by type
+     * 3. Try to generate test values from a spawning type
+     *
+     * @param field
+     * @return
+     */
     private List getTestValuesForField(Field field) {
         // First, try to get test values by field name
         List testValues = testData.TEST_VALUES_BY_FIELDNAME.get(field.getName());
@@ -656,11 +721,64 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
             }
         }
 
+        // Test Collection Classes
+        if (Collection.class.isAssignableFrom(type)) {
+            try {
+                Collection<Object> collection = (Collection) field.get(sourceSupplier.get());
+                // find any object in the collection
+
+                String elementTypeName = collection.stream()
+                        .findAny()
+                        .map(Object::getClass)
+                        .map(Class::getCanonicalName)
+                        .orElseThrow(() -> new IllegalArgumentException("Can't infer type parameter because collection " + field.getName() + " is empty."));
+
+
+                List<Object> testValuesForContainedType = testData.TEST_VALUES_BY_TYPE.get(elementTypeName);
+
+
+                List<Collection> result = testValuesForContainedType.stream()
+                        .map(tv -> {
+                            Collection<Object> newInstance = instantiateType(collection);
+                            newInstance.add(tv);
+                            return newInstance;
+                        })
+                        .collect(Collectors.toList());
+
+                // empty Collection
+                result.add(instantiateType(collection));
+
+                // multiple values
+                Collection<Object> newInstance = instantiateType(collection);
+                newInstance.addAll(testValuesForContainedType);
+                result.add(newInstance);
+
+                return result;
+
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            } catch (Throwable throwable) {
+                throwable.printStackTrace();
+            }
+        }
+
 
         if (testValues == null)
             throw new IllegalArgumentException("Keine Testdaten fuer Typ " + type.getCanonicalName());
 
         return testValues;
+    }
+
+    private <T> T instantiateType(T collection) {
+        try {
+            T newInstance = (T) collection.getClass().newInstance();
+            return newInstance;
+        } catch (InstantiationException e) {
+            e.printStackTrace();
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        }
+        return null;
     }
 
     /**

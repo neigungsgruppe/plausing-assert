@@ -4,7 +4,10 @@ import junit.framework.AssertionFailedError;
 import org.junit.ComparisonFailure;
 import org.junit.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Fail.fail;
@@ -197,6 +200,78 @@ public class MapperAssertTest {
 
     }
 
+    @Test
+    public void should_pass_if_recognizes_collections() {
+
+        Function<IntList, IntList> collectionsMapper = source -> {
+            IntList target = new IntList(Integer.MIN_VALUE);
+            target.intList.addAll(source.intList);
+            return target;
+        };
+
+        assertThat(collectionsMapper).hasPlausibleMappingFor(() -> {
+            IntList result = new IntList(Integer.MIN_VALUE);
+            result.intList.add(Integer.MIN_VALUE);
+            return result;
+        });
+    }
+
+
+    @Test
+    public void should_fail_if_it_doesnt_map_collection_elements() {
+        Function<IntList, IntList> collectionsMapper = source -> {
+            IntList target = new IntList(Integer.MIN_VALUE);
+            if (source.intList == null) {
+                target.intList = null;
+            } else if (!source.intList.isEmpty()) {
+                // Modify first value in list
+                Integer sourceValue = source.intList.get(0);
+                if (new Integer(1).equals(sourceValue)) {
+                    sourceValue = new Integer(2);
+                }
+                target.intList.add(sourceValue);
+            }
+            return target;
+        };
+
+        try {
+            assertThat(collectionsMapper).hasPlausibleMappingFor(() -> {
+                IntList result = new IntList(Integer.MIN_VALUE);
+                result.intList.add(Integer.MIN_VALUE);
+                return result;
+            });
+            fail("Should throw ComparisonFailure");
+        } catch (ComparisonFailure e) {
+            // then expect ComparisonFailure
+            e.printStackTrace();
+            assertThat(e)
+                    .isInstanceOf(ComparisonFailure.class)
+                    .hasMessageContaining("Error in mapping intList --> intList] expected:<[[1]]> but was:<[[2]]");
+        }
+    }
+
+
+    @Test
+    public void should_pass_if_it_maps_every_element_of_collection_correctly() {
+        Function<IntList, LongList> collectionsMapper = source -> {
+            LongList target = new LongList();
+
+            if (source.intList == null) {
+                target.longList = null;
+                return target;
+            }
+
+            target.longList = source.intList.stream()
+                    .map(i -> i == null ? null : new Long(i))
+                    .collect(Collectors.toList());
+            return target;
+        };
+
+        assertThat(collectionsMapper)
+                .withMapper(Mappers.IntegerToLongMapper)
+                .hasPlausibleMappingFor(() -> new IntList(Integer.MIN_VALUE));
+    }
+
 
     /*---------------------------------------------------------------------------------------------------------------
         TEST DATA
@@ -249,4 +324,22 @@ public class MapperAssertTest {
         int intValue;
     }
 
+    public static class IntList {
+        public IntList(int value) {
+            this.intList = new ArrayList();
+            this.intList.add(value);
+        }
+
+        List<Integer> intList;
+    }
+
+
+    private static class LongList {
+        public LongList() {
+            this.longList
+                    = new ArrayList<Long>();
+        }
+
+        List<Long> longList;
+    }
 }

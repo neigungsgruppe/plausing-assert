@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
+ * Utility methods.
+ *
+ *
  * Created by Florian on 15.02.2015.
  */
 public class ReflectionUtil {
@@ -90,5 +93,18 @@ public class ReflectionUtil {
                 throw new IllegalArgumentException("Can't instantiate class " + sourceClass.getCanonicalName());
             }
         };
+    }
+
+    /**
+     * Sets the value of a field in an object.
+     *
+     * @param object object to be used
+     * @param field field to be used
+     * @param fieldValue value to be set
+     * @throws IllegalAccessException
+     */
+    public static void setFieldValue(Object object, Field field, Object fieldValue) throws IllegalAccessException {
+        field.setAccessible(true);
+        field.set(object, fieldValue);
     }
 }
