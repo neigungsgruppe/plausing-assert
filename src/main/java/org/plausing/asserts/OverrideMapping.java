@@ -1,20 +1,24 @@
 package org.plausing.asserts;
 
+import java.util.function.Function;
+
 /**
 * Created by Florian on 17.02.2015.
 */
-public class OverrideMapping<SOURCE, TARGET> {
+public class OverrideMapping<SOURCE_VALUE, TARGET_VALUE> {
 
-    public SOURCE sourceValue;
-    public TARGET targetValue;
+    private final Function<SOURCE_VALUE, TARGET_VALUE> mapping;
     public String sourceFieldName;
     public String targetFieldName;
 
 
-    public OverrideMapping(String sourceFieldName, String targetFieldName, SOURCE sourceValue, TARGET targetValue) {
+    public OverrideMapping(String sourceFieldName, String targetFieldName, Function<SOURCE_VALUE, TARGET_VALUE> mapping) {
         this.sourceFieldName = sourceFieldName;
         this.targetFieldName = targetFieldName;
-        this.sourceValue = sourceValue;
-        this.targetValue = targetValue;
+        this.mapping = mapping;
+    }
+
+    public TARGET_VALUE map(SOURCE_VALUE sourceValue) {
+        return mapping.apply(sourceValue);
     }
 }

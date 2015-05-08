@@ -1,5 +1,6 @@
 package org.plausing.asserts;
 
+import com.google.common.collect.ImmutableMap;
 import junit.framework.AssertionFailedError;
 import org.junit.ComparisonFailure;
 import org.junit.Test;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static java.util.Arrays.asList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Fail.fail;
 import static org.plausing.asserts.PlausingAssertions.assertThat;
@@ -30,9 +32,24 @@ public class MapperAssertTest {
         };
 
         // then
-        assertThat(mapper).hasPlausibleMappingFor(A::new);
+        assertThat(mapper)
+                .hasPlausibleMappingFor(A::new);
     }
 
+
+    @Test
+    public void should_pass_if_string_field_is_mapped_to_string_field_class_reference() {
+        // given a mapper that maps from String to String
+        Function<A, B> mapper = (A a) -> {
+            B b = new B();
+            b.att1 = a.att1;
+            return b;
+        };
+
+        // then
+        assertThat(mapper)
+                .hasPlausibleMappingFor(A.class);
+    }
 
     @Test
     public void should_fail_if_unmapped_fields_exist() {
@@ -41,7 +58,8 @@ public class MapperAssertTest {
 
         try {
             // when testing the mapper
-            assertThat(mapper).hasPlausibleMappingFor(A::new);
+            assertThat(mapper)
+                    .hasPlausibleMappingFor(A::new);
             fail("Wrong mapping hasn't been detected.");
         } catch (AssertionError e) {
             // then expect an AssertionFailedError
@@ -51,7 +69,7 @@ public class MapperAssertTest {
     }
 
     @Test
-    public void should_pass_if_unmapped_field_is_contained_in_excluded_target_fields() throws Exception {
+    public void should_pass_if_unmapped_field_is_contained_in_ignored_target_fields() throws Exception {
         // given a mapper that maps one source field to two target fields
         Function<B, A> mapper = (b) -> {
             A a = new A();
@@ -60,7 +78,7 @@ public class MapperAssertTest {
         };
         // when testing the mapper
         assertThat(mapper)
-                .withExcludedTargetFields("att2")
+                .whenIgnoringTargetFields("att2")
                 .hasPlausibleMappingFor(B::new);
     }
 
@@ -76,7 +94,8 @@ public class MapperAssertTest {
 
         try {
             // when testing the mapper
-            assertThat(mapper).hasPlausibleMappingFor(A::new);
+            assertThat(mapper)
+                    .hasPlausibleMappingFor(A::new);
             fail("Wrong mapping hasn't been detected.");
         } catch (ComparisonFailure e) {
             // then expect an AssertionFailedError
@@ -98,7 +117,8 @@ public class MapperAssertTest {
         };
         try {
             // when testing the mapper
-            assertThat(mapper).hasPlausibleMappingFor(B::new);
+            assertThat(mapper)
+                    .hasPlausibleMappingFor(B::new);
             fail("Wrong mapping hasn't been detected.");
         } catch (AssertionError e) {
             // then expect an Assertion Error
@@ -121,10 +141,26 @@ public class MapperAssertTest {
         };
 
         assertThat(mapper)
-                .withEnumNamesAsTestValuesForField("stringValue", E.class)
+                .whenUsingEnumNamesAsTestValuesForField("stringValue", E.class)
                 .hasPlausibleMappingFor(SE::new);
     }
 
+    @Test
+    public void should_pass_if_enum_maps_to_string_by_name() throws Exception {
+
+        Function<TE, SE> mapper = source -> {
+            SE target = new SE();
+            if (source.enumValue == null) {
+                target.stringValue = null;
+            } else {
+                target.stringValue = source.enumValue.name();
+            }
+            return target;
+        };
+
+        assertThat(mapper)
+                .hasPlausibleMappingFor(TE::new);
+    }
 
     @Test
     public void should_pass_if_enum_maps_to_enum_by_name() throws Exception {
@@ -139,7 +175,8 @@ public class MapperAssertTest {
             return target;
         };
 
-        assertThat(mapper).hasPlausibleMappingFor(TE::new);
+        assertThat(mapper)
+                .hasPlausibleMappingFor(TE::new);
     }
 
 
@@ -160,7 +197,8 @@ public class MapperAssertTest {
             assertThat(mapper)
                     .hasPlausibleMappingFor(TE::new);
         } catch (ComparisonFailure e) {
-            assertThat(e).hasMessageContaining("expected:<ec[2]> but was:<ec[1]>");
+            assertThat(e)
+                    .hasMessageContaining("expected:<ec[2]> but was:<ec[1]>");
         }
     }
 
@@ -173,7 +211,8 @@ public class MapperAssertTest {
             return target;
         };
 
-        assertThat(boxingMapper).hasPlausibleMappingFor(CInt::new);
+        assertThat(boxingMapper)
+                .hasPlausibleMappingFor(CInt::new);
     }
 
     @Test
@@ -187,40 +226,37 @@ public class MapperAssertTest {
 
         try {
             // when
-            assertThat(unboxingMapper).hasPlausibleMappingFor(CInteger::new);
+            assertThat(unboxingMapper)
+                    .hasPlausibleMappingFor(CInteger::new);
             fail("Should throw AssertionFailedError");
         } catch (AssertionFailedError e) {
             // then expect AssertionFaildError
             assertThat(e)
                     .isInstanceOf(AssertionFailedError.class)
-                    .hasMessageContaining("Exception while learning the mapping using field integerValue with value null")
+                    .hasMessageContaining("Exception while training the mapping using field integerValue with value null")
                     .hasCauseInstanceOf(NullPointerException.class);
         }
-
-
     }
 
-    @Test
-    public void should_pass_if_recognizes_collections() {
 
-        Function<IntList, IntList> collectionsMapper = source -> {
-            IntList target = new IntList(Integer.MIN_VALUE);
-            target.intList.addAll(source.intList);
+    @Test
+    public void should_pass_if_maps_from_boxed_to_unboxed_value_using_non_null_test_values() {
+        // given
+        Function<CInteger, CInt> unboxingMapper = source -> {
+            CInt target = new CInt();
+            target.intValue = source.integerValue;
             return target;
         };
 
-        assertThat(collectionsMapper).hasPlausibleMappingFor(() -> {
-            IntList result = new IntList(Integer.MIN_VALUE);
-            result.intList.add(Integer.MIN_VALUE);
-            return result;
-        });
+        assertThat(unboxingMapper)
+                .whenExcludingNullValuesInField("integerValue")
+                .hasPlausibleMappingFor(CInteger::new);
     }
-
 
     @Test
     public void should_fail_if_it_doesnt_map_collection_elements() {
         Function<IntList, IntList> collectionsMapper = source -> {
-            IntList target = new IntList(Integer.MIN_VALUE);
+            IntList target = new IntList();
             if (source.intList == null) {
                 target.intList = null;
             } else if (!source.intList.isEmpty()) {
@@ -235,11 +271,13 @@ public class MapperAssertTest {
         };
 
         try {
-            assertThat(collectionsMapper).hasPlausibleMappingFor(() -> {
-                IntList result = new IntList(Integer.MIN_VALUE);
-                result.intList.add(Integer.MIN_VALUE);
-                return result;
-            });
+            assertThat(collectionsMapper)
+                    .whenSettingCollectionElementType("intList", Integer.class)
+                    .hasPlausibleMappingFor(() -> {
+                        IntList result = new IntList(Integer.MIN_VALUE);
+                        result.intList.add(Integer.MIN_VALUE);
+                        return result;
+                    });
             fail("Should throw ComparisonFailure");
         } catch (ComparisonFailure e) {
             // then expect ComparisonFailure
@@ -268,10 +306,99 @@ public class MapperAssertTest {
         };
 
         assertThat(collectionsMapper)
+                .whenSettingCollectionElementType("intList", Integer.class)
+                .whenSettingCollectionElementType("longList", Long.class)
                 .withMapper(Mappers.IntegerToLongMapper)
                 .hasPlausibleMappingFor(() -> new IntList(Integer.MIN_VALUE));
     }
 
+
+    @Test
+    public void should_fail_if_reference_collection_is_empty_no_hint() {
+        Function<IntList, LongList> collectionsMapper = source -> {
+            LongList target = new LongList();
+
+            if (source.intList == null) {
+                target.longList = null;
+                return target;
+            }
+
+            target.longList = source.intList.stream()
+                    .map(i -> i == null ? null : new Long(i))
+                    .collect(Collectors.toList());
+            return target;
+        };
+
+        try {
+            assertThat(collectionsMapper)
+                    .withMapper(Mappers.IntegerToLongMapper)
+                    .hasPlausibleMappingFor(() -> new IntList());
+            fail("Should throw exception");
+        } catch (Exception e) {
+            assertThat(e)
+                    .hasMessage("Can't infer type parameter because collection intList is empty.");
+        }
+
+    }
+
+    @Test
+    public void should_pass_if_reference_collection_is_empty_with_hint() {
+        Function<IntList, LongList> collectionsMapper = source -> {
+            LongList target = new LongList();
+
+            if (source.intList == null) {
+                target.longList = null;
+                return target;
+            }
+
+            target.longList = source.intList.stream()
+                    .map(i -> i == null ? null : new Long(i))
+                    .collect(Collectors.toList());
+            return target;
+        };
+
+        assertThat(collectionsMapper)
+                .whenSettingCollectionElementType("intList", Integer.class)
+                .whenSettingCollectionElementType("longList", Long.class)
+                .withMapper(Mappers.IntegerToLongMapper)
+                .hasPlausibleMappingFor(() -> new IntList());
+    }
+
+    @Test
+    public void should_pass_if_uses_override() {
+
+        ImmutableMap<String, String> mf = ImmutableMap.<String, String>builder()
+                .put("A", "B")
+                .put("C", "C")
+                .put("", "")
+                .build();
+
+        Function<SE, SE> differentStringMapper = source -> {
+            SE target = new SE();
+            target.stringValue = mf.get(source.stringValue);
+            return target;
+        };
+
+        assertThat(differentStringMapper)
+                .whenUsingTestAndTrainingValuesForType(String.class, asList("A", "B", "C"), "A")
+                .whenUsingMapper(new OverrideMapping<String, String>("stringValue", "stringValue", new Mappers.Mapper(String.class, String.class, asList("A", "B", "C", ""), asList("B", null, "C", "")).mappingFunction))
+                .hasPlausibleMappingFor(SE::new);
+
+    }
+
+    @Test
+    public void should_pass_if_ignores_static_fields() {
+
+        Function<CStatic, CStatic> staticClassMapper = source -> {
+            CStatic target = new CStatic();
+            target.stringValue = source.stringValue;
+            return target;
+        };
+
+        assertThat(staticClassMapper)
+                .hasPlausibleMappingFor(CStatic::new);
+
+    }
 
     /*---------------------------------------------------------------------------------------------------------------
         TEST DATA
@@ -292,7 +419,6 @@ public class MapperAssertTest {
         public String att1;
     }
 
-    @SuppressWarnings("unused")
     public static class SE {
         private String stringValue;
     }
@@ -325,12 +451,20 @@ public class MapperAssertTest {
     }
 
     public static class IntList {
+        public IntList() {
+            this.intList = new ArrayList();
+        }
         public IntList(int value) {
             this.intList = new ArrayList();
             this.intList.add(value);
         }
 
         List<Integer> intList;
+    }
+
+    public static class CStatic {
+        public static final String constant = "constant";
+        String stringValue;
     }
 
 

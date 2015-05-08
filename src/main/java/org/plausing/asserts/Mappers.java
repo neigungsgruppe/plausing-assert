@@ -21,17 +21,17 @@ public class Mappers {
         }
 
         public <SOURCE_TYPE, TARGET_TYPE> Mapper(final Class<SOURCE_TYPE> sourceType, final Class<TARGET_TYPE> targetType, final List<SOURCE_TYPE> sourceValues, final List<TARGET_TYPE> targetValues) {
-            this.typePair = new TypePair(sourceType.getCanonicalName(), targetType.getCanonicalName());
-            this.mappingFunction =
-                    sourceValue -> {
+            this(new TypePair(sourceType, targetType),
+                    (sv) -> {
                         // Test the list for matches
                         for (int co = 0; co < sourceValues.size(); co++) {
-                            if (Objects.equals(sourceValue, sourceValues.get(co))) {
+                            if (Objects.equals(sv, sourceValues.get(co))) {
                                 return (TARGET_TYPE) targetValues.get(co);
                             }
                         }
-                        throw new IllegalArgumentException(String.format("No mapping has been defined for type %s with value \"%s\"", sourceType.getCanonicalName(), sourceValue));
-                    };
+                        throw new IllegalArgumentException(String.format("No mapping has been defined for type %s with value \"%s\"", sourceType.getCanonicalName(), sv));
+                    }
+            );
         }
     }
 

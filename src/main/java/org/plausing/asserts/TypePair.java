@@ -5,10 +5,10 @@ package org.plausing.asserts;
  */
 public class TypePair {
 
-    public String sourceType;
-    public String targetType;
+    public Class sourceType;
+    public Class targetType;
 
-    public TypePair(String sourceType, String targetType) {
+    public TypePair(Class sourceType, Class targetType) {
         this.sourceType = sourceType;
         this.targetType = targetType;
     }
@@ -20,18 +20,16 @@ public class TypePair {
 
         TypePair typePair = (TypePair) o;
 
-        if (sourceType != null ? !sourceType.equals(typePair.sourceType) : typePair.sourceType != null)
-            return false;
-        if (targetType != null ? !targetType.equals(typePair.targetType) : typePair.targetType != null)
-            return false;
+        if (!sourceType.equals(typePair.sourceType)) return false;
+        if (!targetType.equals(typePair.targetType)) return false;
 
         return true;
     }
 
     @Override
     public int hashCode() {
-        int result = sourceType != null ? sourceType.hashCode() : 0;
-        result = 31 * result + (targetType != null ? targetType.hashCode() : 0);
+        int result = sourceType.hashCode();
+        result = 31 * result + targetType.hashCode();
         return result;
     }
 }

@@ -4,10 +4,9 @@ import junit.framework.AssertionFailedError;
 import org.apache.log4j.Logger;
 import org.assertj.core.api.AbstractAssert;
 import org.assertj.core.api.Assertions;
+import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -19,6 +18,7 @@ import java.util.stream.Collectors;
 import static java.util.stream.Collectors.joining;
 import static org.assertj.core.api.Fail.fail;
 import static org.plausing.asserts.ReflectionUtil.getFields;
+import static org.plausing.asserts.ReflectionUtil.instantiateType;
 
 /**
  * Asserts that a function that maps an object of type SOURCE to an object of type TARGET has a plausible mapping logic.
@@ -36,23 +36,26 @@ import static org.plausing.asserts.ReflectionUtil.getFields;
  * with n = number of fields.
  */
 public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SOURCE, TARGET>, Function> {
+    /** Logger. */
+    private static Logger LOG = Logger.getLogger(MapperAssert.class);
 
-    /* Test data. */
-    public static final Date TEST_DATE = Date.from(LocalDate.of(1977, 4, 1).atStartOfDay().atZone(ZoneId.systemDefault()).toInstant());
-    /* Test data. */
-    public static final java.sql.Date TEST_SQL_DATE = new java.sql.Date(TEST_DATE.getTime());
-    /* Test data. */
-    private static final String A_TEST_STRING = "A test string.";
-    /* Logger. */
-    private Logger LOG = Logger.getLogger(MapperAssert.class);
-    /* The mapperUnderTest function under Test */
+    /** The mapperUnderTest function under Test */
     private final Function<SOURCE, TARGET> mapperUnderTest;
-    /* Test data container */
-    private MapperAssertTestData testData;
-    /* Fields that should not be mapped by the mapperUnderTest */
-    private Set<String> excludedTargetFields = new HashSet<String>();
+
+    /** A function that generates a new instance of the source class. */
     private Supplier<SOURCE> sourceSupplier;
-    private TARGET targetReference = null;
+
+    /** A target instance that is used as a reference */
+    private TARGET targetReference;
+
+    /** Test data container */
+    private MapperAssertTestData testData;
+
+    /** Fields that should not be mapped by the mapperUnderTest */
+    private Set<String> excludedTargetFields;
+
+    /** A lookup table of the elements being contained in collection fields. */
+    private Map<String, Class> collectionElementTypes = new HashMap<String, Class>();
 
 
     /**
@@ -65,17 +68,23 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         super(mapperUnderTest, selfType);
         this.mapperUnderTest = mapperUnderTest;
         this.testData = new MapperAssertTestData();
+        this.excludedTargetFields = new  HashSet<String>();
+        this.targetReference = null;
 
         // Default test values.
-        withTestAndLearningValuesForType(String.class, Arrays.asList(A_TEST_STRING, null), A_TEST_STRING);
-        withTestAndLearningValuesForType("int", Arrays.asList(Integer.MIN_VALUE, Integer.MAX_VALUE, 1, -1, 0), 1);
-        withTestAndLearningValuesForType(Integer.class, Arrays.asList(Integer.MIN_VALUE, Integer.MAX_VALUE, 1, -1, 0, null), 1);
-        withTestAndLearningValuesForType("long", Arrays.asList(Long.MIN_VALUE, Long.MAX_VALUE, 1L, -1L, 0L), 1L);
-        withTestAndLearningValuesForType(Long.class, Arrays.asList(Long.MIN_VALUE, Long.MAX_VALUE, 1L, -1L, 0L, null), 1L);
-        withTestAndLearningValuesForType("double", Arrays.asList(Double.MIN_VALUE, Double.MAX_VALUE, 1.0, -1.0, 0.0), 1.0);
-        withTestAndLearningValuesForType(Double.class, Arrays.asList(Double.MIN_VALUE, Double.MAX_VALUE, 1.0, -1.0, 0.0, null), 1.0);
-        withTestAndLearningValuesForType(java.util.Date.class, Arrays.asList(TEST_DATE, null), TEST_DATE);
-        withTestAndLearningValuesForType(java.sql.Date.class, Arrays.asList(TEST_SQL_DATE, null), TEST_SQL_DATE);
+        Date testDate = Date.from(LocalDate.of(1977, 4, 1).atStartOfDay().atZone(ZoneId.systemDefault()).toInstant());
+        java.sql.Date testSqlDate = new java.sql.Date(testDate.getTime());
+        String aTestString = "A test string.";
+
+        whenUsingTestAndTrainingValuesForType(String.class, Arrays.asList(aTestString, null), aTestString);
+        whenUsingTestAndTrainingValuesForType(int.class, Arrays.asList(Integer.MIN_VALUE, Integer.MAX_VALUE, 1, -1, 0), 1);
+        whenUsingTestAndTrainingValuesForType(Integer.class, Arrays.asList(Integer.MIN_VALUE, Integer.MAX_VALUE, 1, -1, 0, null), 1);
+        whenUsingTestAndTrainingValuesForType(long.class, Arrays.asList(Long.MIN_VALUE, Long.MAX_VALUE, 1L, -1L, 0L), 1L);
+        whenUsingTestAndTrainingValuesForType(Long.class, Arrays.asList(Long.MIN_VALUE, Long.MAX_VALUE, 1L, -1L, 0L, null), 1L);
+        whenUsingTestAndTrainingValuesForType(double.class, Arrays.asList(Double.MIN_VALUE, Double.MAX_VALUE, 1.0, -1.0, 0.0), 1.0);
+        whenUsingTestAndTrainingValuesForType(Double.class, Arrays.asList(Double.MIN_VALUE, Double.MAX_VALUE, 1.0, -1.0, 0.0, null), 1.0);
+        whenUsingTestAndTrainingValuesForType(java.util.Date.class, Arrays.asList(testDate, null), testDate);
+        whenUsingTestAndTrainingValuesForType(java.sql.Date.class, Arrays.asList(testSqlDate, null), testSqlDate);
     }
 
     /*---------------------------------------------------------------------------------------------------------------
@@ -158,101 +167,91 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
     /**
      * Excludes fields in the target object from being tested.
      *
-     * @param excludedTargetFields fields in the target class that should not tested.
+     * @param ignoredTargetFields fields in the target class that should not tested.
      * @return reference to the MapperAssert.
      */
-    public MapperAssert<SOURCE, TARGET> withExcludedTargetFields(Set<String> excludedTargetFields) {
-        this.excludedTargetFields = excludedTargetFields;
+    public MapperAssert<SOURCE, TARGET> whenIgnoringTargetFields(String... ignoredTargetFields) {
+        this.excludedTargetFields = new HashSet<String>(Arrays.asList(ignoredTargetFields));
         return myself;
     }
 
     /**
-     * Excludes fields in the target object from being tested.
+     * Sets the type of the collection elements of field fieldName to class type.
      *
-     * @param excludedTargetFields fields in the target class that should not tested.
+     * @param fieldName
+     * @param type
      * @return
      */
-    public MapperAssert<SOURCE, TARGET> withExcludedTargetFields(String... excludedTargetFields) {
-        this.excludedTargetFields = new HashSet<String>(Arrays.asList(excludedTargetFields));
+    public MapperAssert<SOURCE, TARGET> whenSettingCollectionElementType(String fieldName, Class type) {
+        this.collectionElementTypes.put(fieldName, type);
         return myself;
     }
-
 
     /**
      * Sets the list of Enum.name() as test values for the field with name fieldName.
      *
      * @param fieldName name of the field
-     * @param enumType class of the enum to be used.
+     * @param enumType  class of the enum to be used.
      * @param <E>       enum type
      * @return this.
      */
-    public <E extends Enum> MapperAssert<SOURCE, TARGET> withEnumNamesAsTestValuesForField(String fieldName, Class<E> enumType) {
+    public <E extends Enum> MapperAssert<SOURCE, TARGET> whenUsingEnumNamesAsTestValuesForField(String fieldName, Class<E> enumType) {
         List<String> testValues = toStringValuesList(enumType);
-        return this.withTestAndLearningValuesForField(fieldName, testValues, testValues.get(0));
+        return this.withTestAndTrainingValuesForField(fieldName, testValues, testValues.get(0));
     }
 
 
     /**
-     * Sets a list of test values and a learning value for the field with name fieldName.
+     * Sets a list of test values and a training value for the field with name fieldName.
      *
      * @param fieldName     name of the field.
      * @param testValues    list of test values
-     * @param learningValue learing value
+     * @param trainingValue learing value
      * @param <T>           type of test data
      * @return this.
      */
-    private <T> MapperAssert<SOURCE, TARGET> withTestAndLearningValuesForField(String fieldName, List<T> testValues, T learningValue) {
+    private <T> MapperAssert<SOURCE, TARGET> withTestAndTrainingValuesForField(String fieldName, List<T> testValues, T trainingValue) {
         testData.TEST_VALUES_BY_FIELDNAME.put(fieldName, testValues);
-        testData.LEARN_VALUES_BY_FIELDNAME.put(fieldName, learningValue);
+        testData.LEARN_VALUES_BY_FIELDNAME.put(fieldName, trainingValue);
         return myself;
     }
 
 
     /**
-     * Sets a list of test values and a learning value for all fields with type aClass.
+     * Sets a list of test values and a training value for all fields with type aClass.
      *
-     * @param aClass
+     * @param type
      * @param testValues
-     * @param learningValue
-     * @param <T>           Type of testValues and learningValue
+     * @param trainingValue
+     * @param <T>           Type of testValues and trainingValue
      * @return this.
      */
-    public <T> MapperAssert<SOURCE, TARGET> withTestAndLearningValuesForType(Class<T> aClass, List<T> testValues, T learningValue) {
-        return withTestAndLearningValuesForType(aClass.getCanonicalName(), testValues, learningValue);
-    }
-
-    /**
-     * Sets a list of test values and a learning value for all fields with type name typeName.
-     *
-     * @param typeName
-     * @param testValues
-     * @param learningValue
-     * @param <T>           Type of testValues and learningValue
-     * @return this.
-     */
-
-    public <T> MapperAssert<SOURCE, TARGET> withTestAndLearningValuesForType(String typeName, List<T> testValues, T learningValue) {
-        testData.TEST_VALUES_BY_TYPE.put(typeName, testValues);
-        testData.LEARN_VALUES_BY_TYPE.put(typeName, learningValue);
+    public <T> MapperAssert<SOURCE, TARGET> whenUsingTestAndTrainingValuesForType(Class<T> type, List<T> testValues, T trainingValue) {
+        testData.TEST_VALUES_BY_TYPE.put(type, testValues);
+        testData.LEARN_VALUES_BY_TYPE.put(type, trainingValue);
         return myself;
     }
 
     /**
-     * Sets the list of testValues and learningValue from the instances of the enum enumClass.
+     * Sets the list of testValues and trainingValue from the instances of the enum enumClass.
      *
      * @param enumClass the enum.
      * @param <T>       the enum.
      * @return this.
      */
-    public <T extends Enum> MapperAssert<SOURCE, TARGET> withTestAndLearningValuesForEnumType(Class<T> enumClass) {
-        return withTestAndLearningValuesForType(enumClass.getCanonicalName(), toValuesList(enumClass), enumClass.getEnumConstants()[0]);
+    public <T extends Enum> MapperAssert<SOURCE, TARGET> withTestAndTrainingValuesForEnumType(Class<T> enumClass) {
+        return whenUsingTestAndTrainingValuesForType(enumClass, toValuesList(enumClass), enumClass.getEnumConstants()[0]);
     }
 
 
+    public <SOURCE_PROPERTY, TARGET_PROPERTY> MapperAssert<SOURCE, TARGET> withPropertyMapping(String sourcePropertyName, String targetPropertyName, Function<SOURCE_PROPERTY, TARGET_PROPERTY> propertyMapping) {
+        throw new NotImplementedException();
+    }
 
     /*----------------------------------------------------------------------------------------------------------------
         HELPER METHODS
       ---------------------------------------------------------------------------------------------------------------*/
+
 
     /**
      * Adds enum test values for all types that don't have test values yet.
@@ -263,7 +262,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         for (Field sourceField : sourceFields) {
             if (!testData.TEST_VALUES_BY_TYPE.containsKey(sourceField.getType())) {
                 if (Enum.class.isAssignableFrom(sourceField.getType())) {
-                    withTestAndLearningValuesForEnumType((Class<Enum>) sourceField.getType());
+                    withTestAndTrainingValuesForEnumType((Class<Enum>) sourceField.getType());
                 }
             }
         }
@@ -272,7 +271,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
 
     /**
      * Asserts that all fields in TARGET have been set by the mapper
-     * except the fields that have been excluded by withExcludedTargetFields()
+     * except the fields that have been excluded by whenIgnoringTargetFields()
      *
      * @param targetFields        fields of TARGET
      * @param changedTargetFields fields that have been changed in the test.
@@ -290,11 +289,10 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         }
     }
 
-
     /**
      * Asserts that all fields map to corresponding fields in the target class with the expected values.
      *
-     * @param sourceFields list of all fields of the source class
+     * @param sourceFields         list of all fields of the source class
      * @param sourceToTargetFields map
      * @throws IllegalAccessException
      * @throws InstantiationException
@@ -312,7 +310,11 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
 
             LOG.info(String.format("Testing field mapping: %s --> %s ... ", sourceField, targetField));
 
+            boolean nonNullField = testData.NON_NULL_FIELDS.contains(sourceField.getName());
+
             for (Object v : getTestValuesForField(sourceField)) {
+                boolean nullValueOrNonNullableField = v == null && nonNullField;
+                if (nullValueOrNonNullableField) continue;
                 LOG.info(String.format("Testing value: %s ... ", v));
                 assertThatFieldIsMappedToExpectedValue(sourceField, targetField, v);
             }
@@ -332,7 +334,8 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
      * @throws IllegalAccessException
      * @throws NoSuchFieldException
      */
-    private MapperAssert<SOURCE, TARGET> assertThatFieldIsMappedToExpectedValue(Field sourceField, Field targetField, Object testedValue) throws SQLException, IllegalAccessException, NoSuchFieldException {
+    @SuppressWarnings("unchecked")
+    private <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> MapperAssert<SOURCE, TARGET> assertThatFieldIsMappedToExpectedValue(Field sourceField, Field targetField, SOURCE_FIELD_TYPE testedValue) throws SQLException, IllegalAccessException, NoSuchFieldException {
 
         // get a new source reference and change the tested field's value
         SOURCE source = sourceSupplier.get();
@@ -340,18 +343,21 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
 
         // apply the mapper to the source field and get the actualMappedValue value
         TARGET target = mapperUnderTest.apply(source);
-        Object actualMappedValue = getFieldValue(targetField, target);
+        TARGET_FIELD_TYPE actualMappedValue = (TARGET_FIELD_TYPE) ReflectionUtil.getFieldValue(targetField, target);
 
         // guess correct mapping
-        Object expectedMappedValue = getExpectedFieldValue(testedValue, sourceField.getType(), targetField.getType());
+        Class<Object> sourceElementType = collectionElementTypes.get(sourceField.getName());
+        Class<Object> targetElementType = collectionElementTypes.get(targetField.getName());
+        boolean isNonNullField = testData.NON_NULL_FIELDS.contains(sourceField.getName());
+        TARGET_FIELD_TYPE expectedMappedValue = MappingOracle.guessTargetValue(testedValue, (Class<SOURCE_FIELD_TYPE>) sourceField.getType(), (Class<TARGET_FIELD_TYPE>) targetField.getType(), sourceElementType, targetElementType, testData.mappers, isNonNullField);
         // look for declared override for the mapping
         Optional<Object> override = getOverrideForExpectedFieldValue(sourceField.getName(), targetField.getName(), testedValue);
 
         // if there is an override, test with the override
-        if (override.isPresent()) {
+        if (override!=null) {
             Assertions.assertThat(actualMappedValue)
                     .as(String.format("Error in mapping (with override) %s --> %s", sourceField.getName(), targetField.getName()))
-                    .isEqualTo(override.get());
+                    .isEqualTo(override.orElse(null));
             return myself;
         }
 
@@ -360,11 +366,6 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
                 .as(String.format("Error in mapping %s --> %s", sourceField.getName(), targetField.getName()))
                 .isEqualTo(expectedMappedValue);
         return myself;
-    }
-
-    private Object getFieldValue(Field targetField, Object object) throws IllegalAccessException {
-        targetField.setAccessible(true);
-        return targetField.get(object);
     }
 
 
@@ -380,144 +381,11 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
     private <SOURCE_VALUE> Optional<SOURCE_VALUE> getOverrideForExpectedFieldValue(String name, String targetFieldName, SOURCE_VALUE sourceValue) {
         for (OverrideMapping override : testData.overrideMappingValues) {
             if (override.sourceFieldName.equals(name)
-                    && override.targetFieldName.equals(targetFieldName)
-                    && ((override.sourceValue == null && sourceValue == null)
-                    || (override.sourceValue != null && override.sourceValue.equals(sourceValue)))) {
-                return Optional.ofNullable((SOURCE_VALUE) override.targetValue);
+                    && override.targetFieldName.equals(targetFieldName)) {
+                return Optional.ofNullable((SOURCE_VALUE) override.map(sourceValue));
             }
         }
-        return Optional.empty();
-    }
-
-
-    /**
-     * Bildet ein einen Wert sourceValue, der in sourceField steht, auf einen Wert in targetField ab.
-     * <p>
-     * Strategie:
-     * (a) Einfaches Mapping bei identischen Datentypen
-     * (b) Enum zu Enum-Mapping ueber den Name
-     * (c) String zu Enum-Mapping ueber den Name
-     * (d) Collections mappen jedes Element ueber eine Strategie (a-d)
-     *
-     * @param sourceValue
-     * @param sourceType
-     * @param targetType
-     * @return
-     */
-    private Object getExpectedFieldValue(Object sourceValue, Class sourceType, Class targetType) {
-
-        Function valueMapper = testData.mappers.get(new TypePair(sourceType.getCanonicalName(), targetType.getCanonicalName()));
-        Object expected;
-        if (valueMapper != null) {
-            expected = valueMapper.apply(sourceValue);
-        } else if (valueMapper == null && Enum.class.isAssignableFrom(sourceType) && Enum.class.isAssignableFrom(targetType)) {
-            expected = guessEnumToEnumMapping((Enum) sourceValue, (Class<Enum>) targetType);
-        } else if (valueMapper == null && String.class.isAssignableFrom(sourceType) && Enum.class.isAssignableFrom(targetType)) {
-            expected = guessStringToEnumMapping((String) sourceValue, (Class<Enum>) targetType);
-        } else if (valueMapper == null && Enum.class.isAssignableFrom(sourceType) && String.class.isAssignableFrom(targetType)) {
-            expected = guessEnumToStringMapping((Enum) sourceValue);
-        } else if (Collection.class.isAssignableFrom(sourceType) && Collection.class.isAssignableFrom(targetType)) {
-            expected = guessCollectionMapping((Collection) sourceValue, sourceType, targetType);
-        } else if (targetType.isAssignableFrom(sourceType)) {
-            expected = sourceValue;
-        } else {
-            try {
-                expected = guessConstructorMapping(sourceValue, sourceType, targetType);
-            } catch (Exception e) {
-                try {
-                    expected = guessGetterMapping(sourceValue, sourceType, targetType);
-                } catch (Exception e2) {
-                    expected = guessUnboxingMapping(sourceValue, sourceType, targetType);
-                }
-            }
-        }
-        return expected;
-    }
-
-    <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> Collection guessCollectionMapping(Collection sourceValue, Class<SOURCE_FIELD_TYPE> sourceType, Class<TARGET_FIELD_TYPE> targetType) {
-        // pruefen, ob es bereits eine Collection gibt, dann diese verwenden.
-        //Collection targetInstance = (Collection)targetType.newInstance();
-        // Falls nicht, instantiieren wir auf Verdacht eine Implementierung
-        Collection targetInstance = new ArrayList<>();
-
-        for (Object o : sourceValue) {
-            Object expectedElementValue = getExpectedFieldValue(o, Integer.class, Long.class);
-            targetInstance.add(expectedElementValue);
-        }
-        return targetInstance;
-
-    }
-
-    <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> SOURCE_FIELD_TYPE guessUnboxingMapping(SOURCE_FIELD_TYPE sourceValue, Class<SOURCE_FIELD_TYPE> sourceType, Class targetType) {
-        if (sourceType.equals(Integer.class) && targetType.equals(int.class)) {
-            return sourceValue;
-        }
-        if (sourceType.equals(Long.class) && targetType.equals(long.class)) {
-            return sourceValue;
-        }
-        if (sourceType.equals(Double.class) && targetType.equals(double.class)) {
-            return sourceValue;
-        }
-        throw new IllegalArgumentException();
-    }
-
-    <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> TARGET_FIELD_TYPE guessConstructorMapping(SOURCE_FIELD_TYPE sourceValue, Class<SOURCE_FIELD_TYPE> sourceType, Class<TARGET_FIELD_TYPE> targetType) {
-
-        if (sourceValue == null) return null;
-        return ReflectionUtil.instantiateType(targetType, sourceType, sourceValue);
-
-    }
-
-     <SOURCE_FIELD_TYPE, TARGET_FIELD_TYPE> TARGET_FIELD_TYPE guessGetterMapping(SOURCE_FIELD_TYPE sourceValue, Class<SOURCE_FIELD_TYPE> sourceType, Class<TARGET_FIELD_TYPE> targetType) {
-        if (sourceValue == null) return null;
-        Method[] methods = sourceType.getMethods();
-        for (Method method : methods) {
-            if (targetType.equals(method.getReturnType())
-                    && !ReflectionUtil.isStatic(method)
-                    && method.getName().startsWith("get")) {
-                try {
-                    return (TARGET_FIELD_TYPE) method.invoke(sourceValue);
-                } catch (IllegalAccessException e) {
-                    throw new IllegalArgumentException();
-                } catch (InvocationTargetException e) {
-                    throw new IllegalArgumentException();
-                }
-            }
-        }
-
-        if (Long.class.equals(targetType)) {
-            return (TARGET_FIELD_TYPE) guessGetterMapping(sourceValue, sourceType, long.class);
-        }
-
-        if (Integer.class.equals(targetType)) {
-            return (TARGET_FIELD_TYPE) guessGetterMapping(sourceValue, sourceType, int.class);
-        }
-
-        if (Double.class.equals(targetType)) {
-            return (TARGET_FIELD_TYPE) guessGetterMapping(sourceValue, sourceType, double.class);
-        }
-
-        throw new IllegalArgumentException();
-    }
-
-    private String guessEnumToStringMapping(Enum sourceValue) {
-        if (sourceValue == null) return null;
-        return sourceValue.name();
-    }
-
-    private <TARGET_FIELD_TYPE extends Enum> Object guessStringToEnumMapping(String sourceValue, Class<TARGET_FIELD_TYPE> targetType) {
-        if (sourceValue == null) return null;
-        return Enum.valueOf(targetType, sourceValue);
-    }
-
-    private <SOURCE_FIELD_TYPE extends Enum, TARGET_FIELD_TYPE extends Enum> Object guessEnumToEnumMapping(SOURCE_FIELD_TYPE sourceValue, Class<TARGET_FIELD_TYPE> targetType) {
-        if (sourceValue == null) return null;
-        String sourceString = sourceValue.name();
-        return Enum.valueOf(targetType, sourceString);
-    }
-
-    public <SOURCE_PROPERTY, TARGET_PROPERTY> MapperAssert<SOURCE, TARGET> withPropertyMapping(String sourcePropertyName, String targetPropertyName, Function<SOURCE_PROPERTY, TARGET_PROPERTY> propertyMapping) {
-        return myself;
+        return null;
     }
 
 
@@ -555,7 +423,7 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
      * @return
      */
     public <SOURCE_TYPE, TARGET_TYPE> MapperAssert<SOURCE, TARGET> withValueListMapper(final Class<SOURCE_TYPE> sourceClass, final Class<TARGET_TYPE> targetClass, final List<SOURCE_TYPE> sourceValues, final List<TARGET_TYPE> targetValues) {
-        testData.mappers.put(new TypePair(sourceClass.getCanonicalName(), targetClass.getCanonicalName()),
+        testData.mappers.put(new TypePair(sourceClass, targetClass),
                 sourceValue -> {
                     // Test the list for matches
                     for (int co = 0; co < sourceValues.size(); co++) {
@@ -620,7 +488,9 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
     }
 
     private <A, B> Set<Field> applyMapperToTestValues(Field field, List<?> testValues) {
+        boolean isNonNullableField = testData.NON_NULL_FIELDS.contains(field.getName());
         return testValues.stream()
+                .filter(testValue -> !(testValue == null && isNonNullableField))
                 .flatMap(testValue -> setSourceFieldAndApplyMapper(field, testValue).stream())
                 .collect(Collectors.toSet());
     }
@@ -641,50 +511,15 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
             ReflectionUtil.setFieldValue(source, field, testValue);
             target = mapperUnderTest.apply(source);
         } catch (Throwable e) {
-            AssertionFailedError assertionFailedError = new AssertionFailedError("Exception while learning the mapping using field " + field.getName() + " with value " + testValue);
+            AssertionFailedError assertionFailedError = new AssertionFailedError("Exception while training the mapping using field " + field.getName() + " with value " + testValue);
             assertionFailedError.initCause(e);
             throw assertionFailedError;
         }
 
-        Set<Field> changed = getChangedFields(target);
+        Set<Field> changed = ReflectionUtil.getChangedFields(target, targetReference);
         return changed;
     }
 
-
-    /**
-     * Examines the target and collects all the fields that have changed.
-     *
-     * @param target
-     * @param <TARGET>
-     * @return
-     */
-    private <TARGET> Set<Field> getChangedFields(TARGET target) {
-        Set<Field> result = new HashSet<Field>();
-        ArrayList<Field> fields = getFields(targetReference);
-        for (Field field : fields) {
-            field.setAccessible(true);
-            Object vReference;
-            Object vTarget;
-
-            try {
-                vReference = field.get(targetReference);
-                vTarget = field.get(target);
-            } catch (Throwable e) {
-                AssertionFailedError assertionFailedError = new AssertionFailedError("Exception while collecting changed fields: " + field.getName());
-                assertionFailedError.initCause(e);
-                throw assertionFailedError;
-            }
-
-            if (vReference == null && vTarget == null) {
-                continue;
-            } else if (vReference == null && vTarget != null) {
-                result.add(field);
-            } else if (!vReference.equals(vTarget)) {
-                result.add(field);
-            }
-        }
-        return result;
-    }
 
     /**
      * Gets the list of test values for a field using the following strategies:
@@ -695,26 +530,21 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
      * @param field
      * @return
      */
-    private List getTestValuesForField(Field field) {
+    @SuppressWarnings("unchecked")
+    public List getTestValuesForField(Field field) {
         // First, try to get test values by field name
         List testValues = testData.TEST_VALUES_BY_FIELDNAME.get(field.getName());
         if (testValues != null) return testValues;
 
         // Second, try to get test values by type
         Class<?> type = field.getType();
-        testValues = testData.TEST_VALUES_BY_TYPE.get(type.getCanonicalName());
+        testValues = testData.TEST_VALUES_BY_TYPE.get(type);
         if (testValues != null) return testValues;
 
-        // Third, try to generate test values from a spawning type
-        for (String stringName : testData.TEST_VALUES_BY_TYPE.keySet()) {
-            Class spawningClass;
+        // Third, try to generate test values from a generating type
+        for (Class generatingType : testData.TEST_VALUES_BY_TYPE.keySet()) {
             try {
-                spawningClass = Class.forName(stringName);
-            } catch (ClassNotFoundException e) {
-                continue;
-            }
-            try {
-                testValues = generateTestValuesFromGeneratingType(type, spawningClass);
+                testValues = generateTestValuesFromGeneratingType(type, generatingType);
                 return testValues;
             } catch (Exception e) {
                 continue;
@@ -724,32 +554,30 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         // Test Collection Classes
         if (Collection.class.isAssignableFrom(type)) {
             try {
-                Collection<Object> collection = (Collection) field.get(sourceSupplier.get());
-                // find any object in the collection
+                Collection<Object> sourceReference = (Collection) field.get(sourceSupplier.get());
 
-                String elementTypeName = collection.stream()
-                        .findAny()
-                        .map(Object::getClass)
-                        .map(Class::getCanonicalName)
-                        .orElseThrow(() -> new IllegalArgumentException("Can't infer type parameter because collection " + field.getName() + " is empty."));
+                // get source element type from declaration or from a element that
+                // can be found in the source sourceReference.
+                Class sourceCollectionElementType = collectionElementTypes.get(field.getName());
+                if (sourceCollectionElementType == null) {
+                    sourceCollectionElementType = inferElementTypeFromCollectionElements(field, sourceReference);
+                }
+                List<Object> testValuesForContainedType = testData.TEST_VALUES_BY_TYPE.get(sourceCollectionElementType);
 
-
-                List<Object> testValuesForContainedType = testData.TEST_VALUES_BY_TYPE.get(elementTypeName);
-
-
+                // test collections with one value each
                 List<Collection> result = testValuesForContainedType.stream()
                         .map(tv -> {
-                            Collection<Object> newInstance = instantiateType(collection);
+                            Collection<Object> newInstance = instantiateType(sourceReference);
                             newInstance.add(tv);
                             return newInstance;
                         })
                         .collect(Collectors.toList());
 
-                // empty Collection
-                result.add(instantiateType(collection));
+                // test an empty collection
+                result.add(instantiateType(sourceReference));
 
-                // multiple values
-                Collection<Object> newInstance = instantiateType(collection);
+                // test a collection with all of the test values
+                Collection<Object> newInstance = instantiateType(sourceReference);
                 newInstance.addAll(testValuesForContainedType);
                 result.add(newInstance);
 
@@ -757,8 +585,6 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
 
             } catch (IllegalAccessException e) {
                 e.printStackTrace();
-            } catch (Throwable throwable) {
-                throwable.printStackTrace();
             }
         }
 
@@ -769,16 +595,13 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
         return testValues;
     }
 
-    private <T> T instantiateType(T collection) {
-        try {
-            T newInstance = (T) collection.getClass().newInstance();
-            return newInstance;
-        } catch (InstantiationException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        }
-        return null;
+    private Class<?> inferElementTypeFromCollectionElements(Field field, Collection<Object> collection) {
+        // find any object in the collection
+        Class<?> elementTypeName = collection.stream()
+                .findAny()
+                .map(Object::getClass)
+                .orElseThrow(() -> new IllegalArgumentException("Can't infer type parameter because collection " + field.getName() + " is empty."));
+        return elementTypeName;
     }
 
     /**
@@ -798,14 +621,24 @@ public class MapperAssert<SOURCE, TARGET> extends AbstractAssert<MapperAssert<SO
     @SuppressWarnings(value = "unchecked")
     public <GENERATING_TYPE, TARGET> List<TARGET> generateTestValuesFromGeneratingType(Class<TARGET> targetClass, Class<GENERATING_TYPE> generatingType) {
         // Get the values of the generating type from the testData
-        List<GENERATING_TYPE> generatingTestValues = testData.TEST_VALUES_BY_TYPE.get(generatingType.getCanonicalName());
+        List<GENERATING_TYPE> generatingTestValues = testData.TEST_VALUES_BY_TYPE.get(generatingType);
 
         // Instantiate an object of type targetClass for each value of the generatingTestValues
         return generatingTestValues.stream()
-                .map(v -> v == null ? null : ReflectionUtil.instantiateType(targetClass, generatingType, v))
+                .map(v -> v == null ? null : instantiateType(targetClass, generatingType, v))
                 .collect(Collectors.toList());
 
     }
 
+    public MapperAssert<SOURCE, TARGET>   whenExcludingNullValuesInField(String fieldName) {
+        this.testData.NON_NULL_FIELDS.add(fieldName);
+        return myself;
+    }
+
+
+    public MapperAssert<SOURCE, TARGET> whenUsingMapper(OverrideMapping overrideMapping) {
+        testData.overrideMappingValues.add(overrideMapping);
+        return myself;
+    }
 }
 
